@@ -1,28 +1,40 @@
-import { useState } from 'react';
-import { X, Trash2 } from 'lucide-react';
-import { useCart } from '../context/CartContext';
-import { validateBookingForm, ValidationError } from '../utils/validation';
-import { TIME_SLOTS } from '../data/services';
+import { useState, type FormEvent } from "react";
+import { X, Trash2 } from "lucide-react";
+import { useCart } from "../context/CartContext";
+import { validateBookingForm, type ValidationError } from "../utils/validation";
+import { TIME_SLOTS } from "../data/services";
 
 interface CartDrawerProps {
   isOpen: boolean;
   onClose: () => void;
 }
 
+type PaymentUI = "online" | "cash"; // "cash" = presencial (UI antiga)
+type PaymentAPI = "online" | "presencial";
+
 export default function CartDrawer({ isOpen, onClose }: CartDrawerProps) {
-  const { items, removeItem, updateQuantity, getTotal, createOrder } =
-    useCart();
-  const [bookingDate, setBookingDate] = useState('');
-  const [bookingTime, setBookingTime] = useState('');
-  const [paymentMethod, setPaymentMethod] = useState<'online' | 'cash'>('cash');
-  const [notes, setNotes] = useState('');
+  const { items, removeItem, updateQuantity, getTotal, createOrder } = useCart();
+
+  const [bookingDate, setBookingDate] = useState("");
+  const [bookingTime, setBookingTime] = useState("");
+  const [paymentMethod, setPaymentMethod] = useState<PaymentUI>("cash");
+  const [notes, setNotes] = useState("");
+
   const [errors, setErrors] = useState<ValidationError[]>([]);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [orderCreated, setOrderCreated] = useState(false);
 
-  const handleBooking = (e: React.FormEvent) => {
+  // Base URL da API: se quiser, coloque no .env do Vite:
+  // VITE_API_BASE_URL=http://localhost:3000
+  const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || "http://localhost:3000";
+
+  const paymentToApi = (p: PaymentUI): PaymentAPI =>
+    p === "cash" ? "presencial" : "online";
+
+  const handleBooking = async (e: FormEvent) => {
     e.preventDefault();
 
+    // 1) Validação local (frontend)
     const validationErrors = validateBookingForm(
       bookingDate,
       bookingTime,
@@ -35,37 +47,89 @@ export default function CartDrawer({ isOpen, onClose }: CartDrawerProps) {
       return;
     }
 
+    // Segurança extra: se carrinho estiver vazio, não envia
+    if (items.length === 0) {
+      setErrors([{ field: "items", message: "Seu carrinho está vazio." }]);
+      return;
+    }
+
     setIsSubmitting(true);
     setErrors([]);
 
-    setTimeout(() => {
+    try {
+      // 2) Monta payload pro backend (contrato de API)
+      const payload = {
+        items: items.map((i) => ({
+          serviceId: i.serviceId,
+          qty: i.quantity,
+        })),
+        date: bookingDate,
+        time: bookingTime,
+        paymentMethod: paymentToApi(paymentMethod),
+        notes: notes?.trim() ? notes.trim() : undefined,
+      };
+
+      // 3) Envia pro backend
+      const response = await fetch(`${API_BASE_URL}/appointments`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+
+      if (!response.ok) {
+        // tenta ler mensagem do backend
+        let msg = "Não foi possível criar o agendamento.";
+        try {
+          const data = await response.json();
+          if (data?.message) msg = data.message;
+        } catch {
+          // ignora parse error
+        }
+        setErrors([{ field: "api", message: msg }]);
+        return;
+      }
+
+      // 4) Mantém o comportamento do app (criar pedido local / limpar estado)
+      // (o createOrder pode limpar carrinho dependendo do seu CartContext)
       const order = createOrder({
         date: bookingDate,
         time: bookingTime,
-        paymentMethod,
+        paymentMethod, // mantém UI (cash/online) para o app interno
         notes: notes || undefined,
       });
 
       if (order) {
         setOrderCreated(true);
-        setBookingDate('');
-        setBookingTime('');
-        setPaymentMethod('cash');
-        setNotes('');
 
+        // limpa formulário
+        setBookingDate("");
+        setBookingTime("");
+        setPaymentMethod("cash");
+        setNotes("");
+
+        // fecha drawer depois de um tempo
         setTimeout(() => {
           setOrderCreated(false);
           onClose();
         }, 3000);
       }
-
+    } catch (err) {
+      console.error("Erro ao enviar agendamento:", err);
+      setErrors([
+        {
+          field: "api",
+          message:
+            "Falha de conexão com o servidor. Verifique se o backend está rodando.",
+        },
+      ]);
+    } finally {
       setIsSubmitting(false);
-    }, 800);
+    }
   };
 
   const getMinDate = () => {
     const today = new Date();
-    return today.toISOString().split('T')[0];
+    return today.toISOString().split("T")[0];
   };
 
   const hasError = (field: string) => errors.some((err) => err.field === field);
@@ -160,10 +224,7 @@ export default function CartDrawer({ isOpen, onClose }: CartDrawerProps) {
                   <div className="flex items-center gap-2 mt-3">
                     <button
                       onClick={() =>
-                        updateQuantity(
-                          item.serviceId,
-                          Math.max(1, item.quantity - 1)
-                        )
+                        updateQuantity(item.serviceId, Math.max(1, item.quantity - 1))
                       }
                       className="px-2 py-1 bg-gray-200 dark:bg-gray-600 rounded hover:bg-gray-300 dark:hover:bg-gray-500 transition-colors"
                     >
@@ -173,9 +234,7 @@ export default function CartDrawer({ isOpen, onClose }: CartDrawerProps) {
                       {item.quantity}
                     </span>
                     <button
-                      onClick={() =>
-                        updateQuantity(item.serviceId, item.quantity + 1)
-                      }
+                      onClick={() => updateQuantity(item.serviceId, item.quantity + 1)}
                       className="px-2 py-1 bg-gray-200 dark:bg-gray-600 rounded hover:bg-gray-300 dark:hover:bg-gray-500 transition-colors"
                     >
                       +
@@ -186,6 +245,11 @@ export default function CartDrawer({ isOpen, onClose }: CartDrawerProps) {
 
               <div className="border-t border-gray-200 dark:border-gray-700 pt-4 mt-4">
                 <form onSubmit={handleBooking} className="space-y-4">
+                  {/* Erro de API (se existir) */}
+                  {hasError("api") && (
+                    <p className="text-red-500 text-sm">{getErrorMessage("api")}</p>
+                  )}
+
                   <div>
                     <label className="block text-sm font-semibold text-gray-900 dark:text-gray-100 mb-2">
                       Data do Agendamento
@@ -196,14 +260,14 @@ export default function CartDrawer({ isOpen, onClose }: CartDrawerProps) {
                       value={bookingDate}
                       onChange={(e) => setBookingDate(e.target.value)}
                       className={`w-full px-3 py-2 bg-gray-50 dark:bg-gray-700 border rounded-lg text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-gray-900 dark:focus:ring-gray-100 ${
-                        hasError('date')
-                          ? 'border-red-500'
-                          : 'border-gray-200 dark:border-gray-600'
+                        hasError("date")
+                          ? "border-red-500"
+                          : "border-gray-200 dark:border-gray-600"
                       }`}
                     />
-                    {hasError('date') && (
+                    {hasError("date") && (
                       <p className="text-red-500 text-xs mt-1">
-                        {getErrorMessage('date')}
+                        {getErrorMessage("date")}
                       </p>
                     )}
                   </div>
@@ -216,9 +280,9 @@ export default function CartDrawer({ isOpen, onClose }: CartDrawerProps) {
                       value={bookingTime}
                       onChange={(e) => setBookingTime(e.target.value)}
                       className={`w-full px-3 py-2 bg-gray-50 dark:bg-gray-700 border rounded-lg text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-gray-900 dark:focus:ring-gray-100 ${
-                        hasError('time')
-                          ? 'border-red-500'
-                          : 'border-gray-200 dark:border-gray-600'
+                        hasError("time")
+                          ? "border-red-500"
+                          : "border-gray-200 dark:border-gray-600"
                       }`}
                     >
                       <option value="">Selecione um horário</option>
@@ -228,9 +292,9 @@ export default function CartDrawer({ isOpen, onClose }: CartDrawerProps) {
                         </option>
                       ))}
                     </select>
-                    {hasError('time') && (
+                    {hasError("time") && (
                       <p className="text-red-500 text-xs mt-1">
-                        {getErrorMessage('time')}
+                        {getErrorMessage("time")}
                       </p>
                     )}
                   </div>
@@ -245,25 +309,22 @@ export default function CartDrawer({ isOpen, onClose }: CartDrawerProps) {
                           type="radio"
                           name="payment"
                           value="cash"
-                          checked={paymentMethod === 'cash'}
-                          onChange={(e) =>
-                            setPaymentMethod(e.target.value as 'cash')
-                          }
+                          checked={paymentMethod === "cash"}
+                          onChange={(e) => setPaymentMethod(e.target.value as PaymentUI)}
                           className="w-4 h-4"
                         />
                         <span className="text-gray-900 dark:text-gray-100">
                           Pagamento Presencial
                         </span>
                       </label>
+
                       <label className="flex items-center gap-3 cursor-pointer">
                         <input
                           type="radio"
                           name="payment"
                           value="online"
-                          checked={paymentMethod === 'online'}
-                          onChange={(e) =>
-                            setPaymentMethod(e.target.value as 'online')
-                          }
+                          checked={paymentMethod === "online"}
+                          onChange={(e) => setPaymentMethod(e.target.value as PaymentUI)}
                           className="w-4 h-4"
                         />
                         <span className="text-gray-900 dark:text-gray-100">
@@ -271,9 +332,10 @@ export default function CartDrawer({ isOpen, onClose }: CartDrawerProps) {
                         </span>
                       </label>
                     </div>
-                    {hasError('paymentMethod') && (
+
+                    {hasError("paymentMethod") && (
                       <p className="text-red-500 text-xs mt-1">
-                        {getErrorMessage('paymentMethod')}
+                        {getErrorMessage("paymentMethod")}
                       </p>
                     )}
                   </div>
@@ -300,7 +362,7 @@ export default function CartDrawer({ isOpen, onClose }: CartDrawerProps) {
                     disabled={isSubmitting}
                     className="w-full bg-gray-900 dark:bg-gray-100 text-white dark:text-gray-900 py-2 rounded-lg hover:bg-gray-800 dark:hover:bg-gray-200 transition-colors font-semibold disabled:opacity-50 disabled:cursor-not-allowed"
                   >
-                    {isSubmitting ? 'Processando...' : 'Confirmar Agendamento'}
+                    {isSubmitting ? "Processando..." : "Confirmar Agendamento"}
                   </button>
                 </form>
               </div>
