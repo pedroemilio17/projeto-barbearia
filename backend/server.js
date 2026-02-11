@@ -5,12 +5,7 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 
-//const services = [
- // { id: "corte", name: "Corte Masculino", price: 40, duration: 30, description: "Corte clássico ou moderno." },
- // { id: "barba", name: "Barba Completa", price: 35, duration: 25, description: "Modelagem + acabamento." },
-  //{ id: "combo", name: "Combo Corte + Barba", price: 70, duration: 55, description: "O pacote completo." },
-//];
-
+// LISTAGEM DOS SERVIÇOS - IMAGENS PREÇOS CATEGORIAS
 const services = [
   {
     id: 'haircut-classic',
@@ -76,6 +71,42 @@ const services = [
     category: 'combo',
   },
 ];
+
+// LISTAGEM DAS DATAS MARCADAS 
+
+const appointments = [];
+
+app.post("/appointments", (req, res) => {
+  const { items, date, time, paymentMethod } = req.body;
+
+  if (!Array.isArray(items) || items.length === 0) {
+    return res.status(400).json({ message: "Carrinho vazio." });
+  }
+  if (!date || !time) {
+    return res.status(400).json({ message: "Data e hora são obrigatórias." });
+  }
+  if (!["online", "presencial"].includes(paymentMethod)) {
+    return res.status(400).json({ message: "Método de pagamento inválido." });
+  }
+
+  const appointment = {
+    id: Date.now().toString(),
+    items,
+    date,
+    time,
+    paymentMethod,
+    createdAt: new Date().toISOString(),
+  };
+
+  appointments.push(appointment);
+  return res.status(201).json(appointment);
+});
+
+app.get("/appointments", (req, res) => {
+  res.json(appointments);
+});
+
+// INSPEÇÕES
 
 app.get("/services", (req, res) => {
   res.json(services);
