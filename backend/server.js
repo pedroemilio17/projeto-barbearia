@@ -145,8 +145,16 @@ app.post("/appointments", (req, res) => {
   return res.status(201).json(appointment);
 });
 
+const cors = require('cors');
+app.use(cors({ origin: 'https://projeto-barbearia-rng7cxvfx-pedros-projects-bb379b81.vercel.app' }));
+
 app.get("/appointments", (req, res) => {
   res.json(appointments);
 });
 
-app.listen(3000, () => console.log("Backend rodando em http://localhost:3000"));
+//app.listen(3000, () => console.log("Backend rodando em http://localhost:3000"));
+const PORT = process.env.PORT || 3000;
+
+app.listen(PORT, "0.0.0.0", () => {
+  console.log(`Backend rodando na porta http://localhost:${PORT}`);
+});
