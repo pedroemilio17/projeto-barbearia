@@ -127,10 +127,12 @@ app.get("/availability", async (req, res) => {
 // ===== APPOINTMENTS (Supabase) =====
 app.post("/appointments", async (req, res) => {
   try {
-    let { items, date, time, paymentMethod, notes } = req.body;
+    let { userId, items, date, time, paymentMethod, notes } = req.body;
 
     paymentMethod = normalizePaymentMethod(paymentMethod);
-
+    if (!userId || typeof userId !== "string") {
+      return res.status(401).json({ message: "Usuário não autenticado." });
+    }
     if (!Array.isArray(items) || items.length === 0) {
       return res.status(400).json({ message: "Carrinho vazio." });
     }
@@ -187,6 +189,7 @@ app.post("/appointments", async (req, res) => {
     const { data: appt, error: apptErr } = await supabase
       .from("appointments")
       .insert({
+        user_id: userId,
         date,
         time,
         payment_method: paymentMethod,
