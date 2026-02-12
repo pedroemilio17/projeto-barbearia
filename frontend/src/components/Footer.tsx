@@ -37,7 +37,7 @@ export default function Footer() {
               </div>
               <div className="flex items-center gap-3 text-gray-400 hover:text-white transition-colors cursor-pointer">
                 <MessageCircle className="h-5 w-5" />
-                <button onClick={() => window.open('https://wa.me/5511999999999', '_blank')}>
+                <button onClick={() => window.open('https://wa.me/5565996903121', '_blank')}>
                   WhatsApp
                 </button>
               </div>

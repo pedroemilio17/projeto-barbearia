@@ -6,7 +6,7 @@ interface HeroProps {
 
 export default function Hero({ onServicesClick }: HeroProps) {
   const handleWhatsApp = () => {
-    window.open('https://wa.me/5511999999999', '_blank');
+    window.open('https://wa.me/5565996903121', '_blank');
   };
 
   return (
