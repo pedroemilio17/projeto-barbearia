@@ -235,6 +235,31 @@ app.post("/appointments", async (req, res) => {
   }
 });
 
+app.get("/my-appointments", async (req, res) => {
+  const userId = req.query.userId;
+
+  if (!userId || typeof userId !== "string") {
+    return res.status(401).json({ message: "Usuário não autenticado." });
+  }
+
+  const { data, error } = await supabase
+    .from("appointments")
+    .select(`
+      id, date, time, payment_method, notes, created_at,
+      appointment_items(service_id, qty)
+    `)
+    .eq("user_id", userId)
+    .order("date", { ascending: true })
+    .order("time", { ascending: true });
+
+  if (error) {
+    console.error("Supabase /my-appointments error:", error);
+    return res.status(500).json({ message: "Erro ao buscar seus agendamentos." });
+  }
+
+  return res.json(data || []);
+});
+
 app.get("/appointments", async (req, res) => {
   const { data, error } = await supabase
     .from("appointments")
