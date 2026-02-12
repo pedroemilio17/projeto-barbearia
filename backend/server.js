@@ -2,19 +2,23 @@ const express = require("express");
 const cors = require("cors");
 
 const app = express();
+app.use(express.json());
 
+const FRONTEND_ORIGIN = process.env.FRONTEND_ORIGIN; // ex: https://seu-front.vercel.app
 app.use(
   cors({
-    origin: [
-      "http://localhost:5173",
-      "https://projeto-barbearia-rng7cxvfx-pedros-projects-bb379b81.vercel.app",
-    ],
-    methods: ["GET", "POST", "OPTIONS"],
-    allowedHeaders: ["Content-Type"],
+    origin: (origin, cb) => {
+      // permite requests sem origin (Postman/health checks) e o front configurado
+      if (!origin) return cb(null, true);
+      if (!FRONTEND_ORIGIN) return cb(null, true); // fallback: se não setou, não bloqueia (melhor setar!)
+      if (origin === FRONTEND_ORIGIN) return cb(null, true);
+      return cb(new Error("CORS bloqueado para esta origem: " + origin));
+    },
   })
 );
 
-app.use(express.json());
+app.get("/health", (req, res) => res.json({ ok: true }));
+
 
 // LISTAGEM DOS SERVIÇOS - IMAGENS PREÇOS CATEGORIAS
 const services = [
