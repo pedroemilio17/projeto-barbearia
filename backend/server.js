@@ -12,8 +12,12 @@ const FRONTEND_ORIGIN = process.env.FRONTEND_ORIGIN; // ex: https://seu-front.ve
 app.use(
   cors({
     origin: (origin, cb) => {
-      if (!origin) return cb(null, true); // Postman/health checks
-      if (!FRONTEND_ORIGIN) return cb(null, true); // fallback: melhor setar no Render
+      // Permite requests sem origin (Postman/health checks)
+      if (!origin) return cb(null, true);
+
+      // Em produção, SETE FRONTEND_ORIGIN no Render. Esse fallback é só pra não travar debug.
+      if (!FRONTEND_ORIGIN) return cb(null, true);
+
       if (origin === FRONTEND_ORIGIN) return cb(null, true);
       return cb(new Error("CORS bloqueado para esta origem: " + origin));
     },
@@ -22,13 +26,57 @@ app.use(
   })
 );
 
-// ===== HEALTH =====
+// ===== HEALTH / ROOT =====
 app.get("/health", (req, res) => res.json({ ok: true }));
 
-// ===== ROOT =====
 app.get("/", (req, res) => {
-  res.send("API FIX BARBEARIA rodando. Use /services e /appointments");
+  res.send("API FIX BARBEARIA rodando. Use /services, /appointments e /availability");
 });
+
+// ===== HELPERS =====
+const normalizePaymentMethod = (pm) => {
+  if (pm === "cash") return "presencial";
+  return pm;
+};
+
+function toMinutes(hhmm) {
+  const [h, m] = String(hhmm).split(":").map(Number);
+  return h * 60 + m;
+}
+
+function overlaps(startA, endA, startB, endB) {
+  // intervalos [start, end)
+  return startA < endB && startB < endA;
+}
+
+async function getValidServiceIds() {
+  const { data, error } = await supabase.from("services").select("id");
+  if (error) throw error;
+  return new Set((data || []).map((s) => s.id));
+}
+
+async function getDurationByServiceId() {
+  const { data, error } = await supabase.from("services").select("id, duration");
+  if (error) throw error;
+
+  const map = new Map();
+  for (const s of data || []) map.set(s.id, s.duration);
+  return map;
+}
+
+async function getExistingBlocksForDate(date) {
+  const { data, error } = await supabase
+    .from("appointments")
+    .select("time, appointment_items(service_id, qty)")
+    .eq("date", date);
+
+  if (error) throw error;
+  return data || [];
+}
+
+function normalizeNotes(notes) {
+  return typeof notes === "string" && notes.trim() ? notes.trim() : null;
+}
 
 // ===== SERVICES (Supabase) =====
 app.get("/services", async (req, res) => {
@@ -45,17 +93,36 @@ app.get("/services", async (req, res) => {
   return res.json(data);
 });
 
-// ===== HELPERS =====
-const normalizePaymentMethod = (pm) => {
-  if (pm === "cash") return "presencial";
-  return pm;
-};
+// ===== AVAILABILITY (Supabase) =====
+// Retorna blocos do dia: [{ time: "17:00", totalMinutes: 45 }, ...]
+app.get("/availability", async (req, res) => {
+  try {
+    const { date } = req.query;
 
-async function getValidServiceIds() {
-  const { data, error } = await supabase.from("services").select("id");
-  if (error) throw error;
-  return new Set(data.map((s) => s.id));
-}
+    if (!date || typeof date !== "string") {
+      return res
+        .status(400)
+        .json({ message: "Parâmetro 'date' é obrigatório (YYYY-MM-DD)." });
+    }
+
+    const appts = await getExistingBlocksForDate(date);
+    const durationById = await getDurationByServiceId();
+
+    const blocks = (appts || []).map((a) => {
+      const totalMinutes = (a.appointment_items || []).reduce((sum, it) => {
+        const dur = durationById.get(it.service_id) || 0;
+        return sum + dur * (it.qty || 1);
+      }, 0);
+
+      return { time: a.time, totalMinutes };
+    });
+
+    return res.json({ date, blocks });
+  } catch (err) {
+    console.error("GET /availability unexpected error:", err);
+    return res.status(500).json({ message: "Erro interno." });
+  }
+});
 
 // ===== APPOINTMENTS (Supabase) =====
 app.post("/appointments", async (req, res) => {
@@ -74,11 +141,11 @@ app.post("/appointments", async (req, res) => {
       return res.status(400).json({ message: "Método de pagamento inválido." });
     }
 
-    // Valida IDs e quantidades consultando o banco (fonte da verdade)
-    const serviceIds = await getValidServiceIds();
+    // 1) Validar IDs e qty
+    const validIds = await getValidServiceIds();
 
     for (const it of items) {
-      if (!it?.serviceId || !serviceIds.has(it.serviceId)) {
+      if (!it?.serviceId || !validIds.has(it.serviceId)) {
         return res.status(400).json({ message: "Serviço inválido no carrinho." });
       }
       if (!Number.isInteger(it.qty) || it.qty < 1 || it.qty > 10) {
@@ -86,25 +153,55 @@ app.post("/appointments", async (req, res) => {
       }
     }
 
-    // 1) cria appointment (conflito de horário é controlado pelo unique index no banco)
+    // 2) BLOQUEIO DE SOBREPOSIÇÃO REAL (por duração)
+    const durationById = await getDurationByServiceId();
+
+    const requestedMinutes = items.reduce((sum, it) => {
+      const dur = durationById.get(it.serviceId) || 0;
+      return sum + dur * it.qty;
+    }, 0);
+
+    const reqStart = toMinutes(time);
+    const reqEnd = reqStart + requestedMinutes;
+
+    const existing = await getExistingBlocksForDate(date);
+
+    for (const a of existing) {
+      const aStart = toMinutes(a.time);
+
+      const aMinutes = (a.appointment_items || []).reduce((sum, it) => {
+        const dur = durationById.get(it.service_id) || 0;
+        return sum + dur * (it.qty || 1);
+      }, 0);
+
+      const aEnd = aStart + aMinutes;
+
+      if (overlaps(reqStart, reqEnd, aStart, aEnd)) {
+        return res.status(409).json({
+          message: "Este horário conflita com outro agendamento.",
+        });
+      }
+    }
+
+    // 3) Criar appointment
     const { data: appt, error: apptErr } = await supabase
       .from("appointments")
       .insert({
         date,
         time,
         payment_method: paymentMethod,
-        notes: typeof notes === "string" && notes.trim() ? notes.trim() : null,
+        notes: normalizeNotes(notes),
       })
       .select("id, date, time, payment_method, notes, created_at")
       .single();
 
     if (apptErr) {
-      // quando o horário já existe, o banco rejeita (unique index)
       console.error("Supabase insert appointments error:", apptErr);
+      // Se ainda existir conflito por UNIQUE(date,time), trate como ocupado
       return res.status(409).json({ message: "Este horário já está reservado." });
     }
 
-    // 2) cria itens
+    // 4) Criar itens
     const rows = items.map((it) => ({
       appointment_id: appt.id,
       service_id: it.serviceId,
@@ -152,58 +249,8 @@ app.get("/appointments", async (req, res) => {
     return res.status(500).json({ message: "Erro ao buscar agendamentos." });
   }
 
-  app.get("/availability", async (req, res) => {
-  try {
-    const { date } = req.query;
-
-    if (!date || typeof date !== "string") {
-      return res.status(400).json({ message: "Parâmetro 'date' é obrigatório (YYYY-MM-DD)." });
-    }
-
-    // Puxa agendamentos do dia + itens
-    const { data: appts, error: apptsErr } = await supabase
-      .from("appointments")
-      .select("id, time, appointment_items(service_id, qty)")
-      .eq("date", date);
-
-    if (apptsErr) {
-      console.error("Supabase /availability appointments error:", apptsErr);
-      return res.status(500).json({ message: "Erro ao buscar disponibilidade." });
-    }
-
-    // Puxa duração dos serviços (map id->duration)
-    const { data: svc, error: svcErr } = await supabase
-      .from("services")
-      .select("id, duration");
-
-    if (svcErr) {
-      console.error("Supabase /availability services error:", svcErr);
-      return res.status(500).json({ message: "Erro ao buscar serviços." });
-    }
-
-    const durationById = new Map(svc.map((s) => [s.id, s.duration]));
-
-    // Retorna blocos (startTime + totalMinutes)
-    const blocks = (appts || []).map((a) => {
-      const totalMinutes = (a.appointment_items || []).reduce((sum, it) => {
-        const dur = durationById.get(it.service_id) || 0;
-        return sum + dur * (it.qty || 1);
-      }, 0);
-
-      return { time: a.time, totalMinutes };
-    });
-
-    return res.json({ date, blocks });
-  } catch (err) {
-    console.error("GET /availability unexpected error:", err);
-    return res.status(500).json({ message: "Erro interno." });
-  }
-});
-
-
-
   return res.json(
-    data.map((a) => ({
+    (data || []).map((a) => ({
       id: a.id,
       date: a.date,
       time: a.time,
