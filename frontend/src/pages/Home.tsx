@@ -4,14 +4,15 @@ import Header from "../components/Header";
 import Hero from "../components/Hero";
 import ServiceGrid from "../components/ServiceGrid";
 import ServiceModal from "../components/ServiceModal";
-import CartDrawer from "../components/CartDrawer";
 import Footer from "../components/Footer";
 import { getServices } from "../services/servicesApi";
+import { useNavigate } from "react-router-dom";
+
 
 export default function Home() {
+  const navigate = useNavigate();
   const [selectedService, setSelectedService] = useState<Service | null>(null);
   const [isModalOpen, setIsModalOpen] = useState(false);
-  const [isCartOpen, setIsCartOpen] = useState(false);
 
   const [services, setServices] = useState<Service[]>([]);
   const [loadingServices, setLoadingServices] = useState(true);
@@ -62,7 +63,7 @@ export default function Home() {
 
   return (
     <div className="min-h-screen bg-white dark:bg-gray-900 transition-colors duration-300">
-      <Header onCartClick={() => setIsCartOpen(true)} />
+      <Header onCartClick={() => navigate("/agendar")} />
 
       <Hero onServicesClick={scrollToServices} />
 
@@ -171,7 +172,6 @@ export default function Home() {
 
       <ServiceModal service={selectedService} isOpen={isModalOpen} onClose={handleCloseModal} />
 
-      <CartDrawer isOpen={isCartOpen} onClose={() => setIsCartOpen(false)} />
 
       <Footer />
     </div>
