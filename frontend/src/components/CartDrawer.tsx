@@ -1,10 +1,10 @@
-import { useState, type FormEvent } from "react";
+import { useEffect, useMemo, useState, type FormEvent } from "react";
 import { X, Trash2 } from "lucide-react";
 import { useCart } from "../context/CartContext";
 import { validateBookingForm, type ValidationError } from "../utils/validation";
 import { TIME_SLOTS } from "../data/services";
-import { useEffect, useMemo, useState } from "react";
 import { getAvailability } from "../services/availabilityApi";
+import { useAuth } from "../auth/AuthProvider";
 
 
 interface CartDrawerProps {
@@ -35,6 +35,7 @@ function expandBlocksToSlots(blocks: { time: string; totalMinutes: number }[]) {
 
 
 export default function CartDrawer({ isOpen, onClose }: CartDrawerProps) {
+    const { user } = useAuth();
   const { items, removeItem, updateQuantity, getTotal, createOrder } = useCart();
 
   const [bookingDate, setBookingDate] = useState("");
@@ -124,8 +125,14 @@ useEffect(() => {
     setErrors([]);
 
     try {
+        if (!user?.id) {
+          setErrors([{ field: "api", message: "Sessão inválida. Faça login novamente." }]);
+          return;
+        }
+
       // 2) Monta payload pro backend (contrato de API)
       const payload = {
+        userId: user.id, // <- importante
         items: items.map((i) => ({
           serviceId: i.serviceId,
           qty: i.quantity,
