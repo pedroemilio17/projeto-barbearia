@@ -2,7 +2,18 @@ const express = require("express");
 const cors = require("cors");
 
 const app = express();
-app.use(cors());
+
+app.use(
+  cors({
+    origin: [
+      "http://localhost:5173",
+      "https://projeto-barbearia-rng7cxvfx-pedros-projects-bb379b81.vercel.app",
+    ],
+    methods: ["GET", "POST", "OPTIONS"],
+    allowedHeaders: ["Content-Type"],
+  })
+);
+
 app.use(express.json());
 
 // LISTAGEM DOS SERVIÇOS - IMAGENS PREÇOS CATEGORIAS
@@ -145,8 +156,6 @@ app.post("/appointments", (req, res) => {
   return res.status(201).json(appointment);
 });
 
-const cors = require('cors');
-app.use(cors({ origin: 'https://projeto-barbearia-rng7cxvfx-pedros-projects-bb379b81.vercel.app' }));
 
 app.get("/appointments", (req, res) => {
   res.json(appointments);
