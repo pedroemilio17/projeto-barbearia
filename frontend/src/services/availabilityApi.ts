@@ -1,8 +1,10 @@
 import { apiFetch } from "./api";
 
+export type AvailabilityBlock = { time: string; totalMinutes: number };
+
 export type AvailabilityResponse = {
   date: string;
-  bookedTimes: string[];
+  blocks: AvailabilityBlock[];
 };
 
 export function getAvailability(date: string) {

@@ -14,6 +14,25 @@ interface CartDrawerProps {
 
 type PaymentUI = "online" | "cash"; // "cash" = presencial (UI antiga)
 type PaymentAPI = "online" | "presencial";
+function addMinutes(hhmm: string, minutes: number) {
+  const [h, m] = hhmm.split(":").map(Number);
+  const total = h * 60 + m + minutes;
+  const hh = String(Math.floor(total / 60)).padStart(2, "0");
+  const mm = String(total % 60).padStart(2, "0");
+  return `${hh}:${mm}`;
+}
+
+function expandBlocksToSlots(blocks: { time: string; totalMinutes: number }[]) {
+  const out = new Set<string>();
+  for (const b of blocks) {
+    const steps = Math.ceil((b.totalMinutes || 0) / 30); // slots de 30min
+    for (let i = 0; i < Math.max(1, steps); i++) {
+      out.add(addMinutes(b.time, i * 30));
+    }
+  }
+  return out;
+}
+
 
 export default function CartDrawer({ isOpen, onClose }: CartDrawerProps) {
   const { items, removeItem, updateQuantity, getTotal, createOrder } = useCart();
@@ -41,17 +60,20 @@ useEffect(() => {
 
     try {
       setLoadingTimes(true);
+
       const data = await getAvailability(bookingDate);
 
+      const blockedSet = expandBlocksToSlots(data.blocks || []);
+      const blockedArr = Array.from(blockedSet);
+
       if (alive) {
-        setBookedTimes(data.bookedTimes || []);
-      }
+        setBookedTimes(blockedArr);
 
-      // Se o horário selecionado ficou ocupado, limpa
-      if (alive && bookingTime && (data.bookedTimes || []).includes(bookingTime)) {
-        setBookingTime('');
+        // Se o horário selecionado ficou ocupado, limpa
+        if (bookingTime && blockedSet.has(bookingTime)) {
+          setBookingTime("");
+        }
       }
-
     } catch (error) {
       console.error("Erro ao carregar disponibilidade:", error);
       if (alive) setBookedTimes([]);
@@ -65,7 +87,8 @@ useEffect(() => {
   return () => {
     alive = false;
   };
-}, [bookingDate]);
+}, [bookingDate, bookingTime]);
+
 
 
   // Base URL da API: se quiser, coloque no .env do Vite:

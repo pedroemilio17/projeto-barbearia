@@ -160,27 +160,46 @@ app.get("/appointments", async (req, res) => {
       return res.status(400).json({ message: "Parâmetro 'date' é obrigatório (YYYY-MM-DD)." });
     }
 
-    const { data, error } = await supabase
+    // Puxa agendamentos do dia + itens
+    const { data: appts, error: apptsErr } = await supabase
       .from("appointments")
-      .select("time")
+      .select("id, time, appointment_items(service_id, qty)")
       .eq("date", date);
 
-    if (error) {
-      console.error("Supabase /availability error:", error);
+    if (apptsErr) {
+      console.error("Supabase /availability appointments error:", apptsErr);
       return res.status(500).json({ message: "Erro ao buscar disponibilidade." });
     }
 
-    const bookedTimes = [...new Set((data || []).map((r) => r.time))].sort();
+    // Puxa duração dos serviços (map id->duration)
+    const { data: svc, error: svcErr } = await supabase
+      .from("services")
+      .select("id, duration");
 
-    return res.json({
-      date,
-      bookedTimes, // ex: ["09:00", "10:30"]
+    if (svcErr) {
+      console.error("Supabase /availability services error:", svcErr);
+      return res.status(500).json({ message: "Erro ao buscar serviços." });
+    }
+
+    const durationById = new Map(svc.map((s) => [s.id, s.duration]));
+
+    // Retorna blocos (startTime + totalMinutes)
+    const blocks = (appts || []).map((a) => {
+      const totalMinutes = (a.appointment_items || []).reduce((sum, it) => {
+        const dur = durationById.get(it.service_id) || 0;
+        return sum + dur * (it.qty || 1);
+      }, 0);
+
+      return { time: a.time, totalMinutes };
     });
+
+    return res.json({ date, blocks });
   } catch (err) {
     console.error("GET /availability unexpected error:", err);
     return res.status(500).json({ message: "Erro interno." });
   }
 });
+
 
 
   return res.json(
