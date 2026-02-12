@@ -151,7 +151,7 @@ export default function Home() {
                 Telefone
               </h3>
               <p className="text-gray-600 dark:text-gray-400">
-                +55 (11) 9999-9999
+                +55 (65) 9690-3121
               </p>
             </div>
 
