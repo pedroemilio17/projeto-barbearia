@@ -3,6 +3,9 @@ import { X, Trash2 } from "lucide-react";
 import { useCart } from "../context/CartContext";
 import { validateBookingForm, type ValidationError } from "../utils/validation";
 import { TIME_SLOTS } from "../data/services";
+import { useEffect, useMemo, useState } from "react";
+import { getAvailability } from "../services/availabilityApi";
+
 
 interface CartDrawerProps {
   isOpen: boolean;
@@ -23,6 +26,47 @@ export default function CartDrawer({ isOpen, onClose }: CartDrawerProps) {
   const [errors, setErrors] = useState<ValidationError[]>([]);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [orderCreated, setOrderCreated] = useState(false);
+  const [bookedTimes, setBookedTimes] = useState<string[]>([]);
+  const [loadingTimes, setLoadingTimes] = useState(false);
+
+
+useEffect(() => {
+  let alive = true;
+
+  async function loadAvailability() {
+    if (!bookingDate) {
+      setBookedTimes([]);
+      return;
+    }
+
+    try {
+      setLoadingTimes(true);
+      const data = await getAvailability(bookingDate);
+
+      if (alive) {
+        setBookedTimes(data.bookedTimes || []);
+      }
+
+      // Se o horário selecionado ficou ocupado, limpa
+      if (alive && bookingTime && (data.bookedTimes || []).includes(bookingTime)) {
+        setBookingTime('');
+      }
+
+    } catch (error) {
+      console.error("Erro ao carregar disponibilidade:", error);
+      if (alive) setBookedTimes([]);
+    } finally {
+      if (alive) setLoadingTimes(false);
+    }
+  }
+
+  loadAvailability();
+
+  return () => {
+    alive = false;
+  };
+}, [bookingDate]);
+
 
   // Base URL da API: se quiser, coloque no .env do Vite:
   // VITE_API_BASE_URL=http://localhost:3000
@@ -279,19 +323,27 @@ export default function CartDrawer({ isOpen, onClose }: CartDrawerProps) {
                     <select
                       value={bookingTime}
                       onChange={(e) => setBookingTime(e.target.value)}
+                      disabled={!bookingDate || loadingTimes}
                       className={`w-full px-3 py-2 bg-gray-50 dark:bg-gray-700 border rounded-lg text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-gray-900 dark:focus:ring-gray-100 ${
-                        hasError("time")
-                          ? "border-red-500"
-                          : "border-gray-200 dark:border-gray-600"
+                        hasError("time") ? "border-red-500" : "border-gray-200 dark:border-gray-600"
                       }`}
                     >
-                      <option value="">Selecione um horário</option>
-                      {TIME_SLOTS.map((slot) => (
-                        <option key={slot} value={slot}>
-                          {slot}
-                        </option>
-                      ))}
+                      <option value="">
+                        {loadingTimes ? "Carregando horários..." : "Selecione um horário"}
+                      </option>
+
+                      {TIME_SLOTS.map((slot) => {
+                        const isBooked = bookedTimes.includes(slot);
+
+                        return (
+                          <option key={slot} value={slot} disabled={isBooked}>
+                            {slot}
+                            {isBooked ? " (ocupado)" : ""}
+                          </option>
+                        );
+                      })}
                     </select>
+
                     {hasError("time") && (
                       <p className="text-red-500 text-xs mt-1">
                         {getErrorMessage("time")}

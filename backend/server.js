@@ -152,6 +152,37 @@ app.get("/appointments", async (req, res) => {
     return res.status(500).json({ message: "Erro ao buscar agendamentos." });
   }
 
+  app.get("/availability", async (req, res) => {
+  try {
+    const { date } = req.query;
+
+    if (!date || typeof date !== "string") {
+      return res.status(400).json({ message: "Parâmetro 'date' é obrigatório (YYYY-MM-DD)." });
+    }
+
+    const { data, error } = await supabase
+      .from("appointments")
+      .select("time")
+      .eq("date", date);
+
+    if (error) {
+      console.error("Supabase /availability error:", error);
+      return res.status(500).json({ message: "Erro ao buscar disponibilidade." });
+    }
+
+    const bookedTimes = [...new Set((data || []).map((r) => r.time))].sort();
+
+    return res.json({
+      date,
+      bookedTimes, // ex: ["09:00", "10:30"]
+    });
+  } catch (err) {
+    console.error("GET /availability unexpected error:", err);
+    return res.status(500).json({ message: "Erro interno." });
+  }
+});
+
+
   return res.json(
     data.map((a) => ({
       id: a.id,
